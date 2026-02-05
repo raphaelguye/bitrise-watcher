@@ -1,0 +1,15 @@
+.DS_Store
+
+# Xcode
+DerivedData/
+*.xcuserdata/
+*.xcscmblueprint
+*.xccheckout
+*.xcworkspace
+
+# XcodeGen output (generated locally)
+*.xcodeproj
+
+# SwiftPM
+.swiftpm/
+.build/
