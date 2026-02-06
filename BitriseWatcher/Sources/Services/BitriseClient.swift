@@ -88,8 +88,8 @@ actor BitriseClient: BitriseBuildsProviding {
 
     do {
       let response = try decoder.decode(BitriseBuildsResponse.self, from: data)
-      let builds = response.data.map { $0.toBuild() }
-      return builds.sorted { $0.buildNumber > $1.buildNumber }
+      let builds = response.data.map { $0.toBuild() }.sorted { $0.buildNumber > $1.buildNumber }
+      return try await attachArtifactMetadata(appSlug: appSlug, builds: builds)
     } catch {
       throw BitriseClientError.decodingError
     }
@@ -109,6 +109,7 @@ private struct BitriseBuildDTO: Decodable {
   let buildNumber: Int?
   let branch: LossyString?
   let triggeredWorkflow: String?
+  let commitMessage: String?
   let status: Int?
   let startedOnWorkerAt: Date?
   let triggeredAt: Date?
@@ -118,6 +119,7 @@ private struct BitriseBuildDTO: Decodable {
     case buildNumber = "build_number"
     case branch
     case triggeredWorkflow = "triggered_workflow"
+    case commitMessage = "commit_message"
     case status
     case startedOnWorkerAt = "started_on_worker_at"
     case triggeredAt = "triggered_at"
@@ -134,8 +136,10 @@ private struct BitriseBuildDTO: Decodable {
       buildNumber: number,
       workflowID: wf,
       branch: branchValue,
+      title: commitMessage?.trimmingCharacters(in: .whitespacesAndNewlines),
       status: BuildStatus(bitriseStatusCode: status),
-      startedAt: startedOnWorkerAt ?? triggeredAt ?? .now
+      startedAt: startedOnWorkerAt ?? triggeredAt ?? .now,
+      artifact: nil
     )
   }
 }
@@ -183,3 +187,112 @@ private extension BuildStatus {
   }
 }
 
+private extension BitriseClient {
+  func attachArtifactMetadata(appSlug: String, builds: [Build]) async throws -> [Build] {
+    let maxBuildsToEnrich = min(builds.count, 20)
+    let head = Array(builds.prefix(maxBuildsToEnrich))
+    let tail = Array(builds.dropFirst(maxBuildsToEnrich))
+
+    var enriched = head
+
+    try await withThrowingTaskGroup(of: (Int, BuildArtifact?).self) { group in
+      for (index, build) in head.enumerated() {
+        group.addTask { [urlSession, configuration] in
+          let artifact = try await BitriseClient.fetchInstallableArtifact(
+            urlSession: urlSession,
+            baseURL: configuration.baseURL,
+            apiToken: configuration.apiToken,
+            appSlug: appSlug,
+            buildSlug: build.id
+          )
+          return (index, artifact)
+        }
+      }
+
+      for try await (index, artifact) in group {
+        enriched[index] = Build(
+          id: enriched[index].id,
+          buildNumber: enriched[index].buildNumber,
+          workflowID: enriched[index].workflowID,
+          branch: enriched[index].branch,
+          title: enriched[index].title,
+          status: enriched[index].status,
+          startedAt: enriched[index].startedAt,
+          artifact: artifact
+        )
+      }
+    }
+
+    return enriched + tail
+  }
+
+  static func fetchInstallableArtifact(
+    urlSession: URLSession,
+    baseURL: URL,
+    apiToken: String,
+    appSlug: String,
+    buildSlug: String
+  ) async throws -> BuildArtifact? {
+    let url = baseURL.appendingPathComponent("apps/\(appSlug)/builds/\(buildSlug)/artifacts")
+
+    var request = URLRequest(url: url)
+    request.httpMethod = "GET"
+    request.setValue(apiToken, forHTTPHeaderField: "Authorization")
+    request.setValue("application/json", forHTTPHeaderField: "Accept")
+
+    let (data, response) = try await urlSession.data(for: request)
+    guard let httpResponse = response as? HTTPURLResponse else { return nil }
+    guard (200..<300).contains(httpResponse.statusCode) else { return nil }
+
+    let decoder = JSONDecoder()
+    guard let artifactsResponse = try? decoder.decode(BitriseArtifactsResponse.self, from: data) else { return nil }
+
+    let preferredTypes: Set<String> = ["ios-ipa", "android-apk", "android-aab"]
+    let artifact = artifactsResponse.data.first(where: { preferredTypes.contains($0.artifactType ?? "") }) ?? artifactsResponse.data.first
+
+    guard let artifact, let title = artifact.title, let type = artifact.artifactType else { return nil }
+    let (version, buildNumber) = parseVersionAndBuildNumber(from: title)
+
+    return BuildArtifact(
+      title: title,
+      type: type,
+      appVersion: version,
+      appBuildNumber: buildNumber
+    )
+  }
+
+  static func parseVersionAndBuildNumber(from text: String) -> (String?, String?) {
+    let versionRegex = try? NSRegularExpression(pattern: #"(?:^|[^0-9])v?(\d+(?:\.\d+){1,3})"#)
+    let buildRegex = try? NSRegularExpression(pattern: #"\((\d{1,10})\)"#)
+
+    var version: String?
+    if let match = versionRegex?.firstMatch(in: text, range: NSRange(text.startIndex..., in: text)),
+       let range = Range(match.range(at: 1), in: text)
+    {
+      version = String(text[range])
+    }
+
+    var buildNumber: String?
+    if let match = buildRegex?.firstMatch(in: text, range: NSRange(text.startIndex..., in: text)),
+       let range = Range(match.range(at: 1), in: text)
+    {
+      buildNumber = String(text[range])
+    }
+
+    return (version, buildNumber)
+  }
+}
+
+private struct BitriseArtifactsResponse: Decodable {
+  let data: [BitriseArtifactDTO]
+}
+
+private struct BitriseArtifactDTO: Decodable {
+  let title: String?
+  let artifactType: String?
+
+  enum CodingKeys: String, CodingKey {
+    case title
+    case artifactType = "artifact_type"
+  }
+}

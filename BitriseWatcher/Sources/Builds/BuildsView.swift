@@ -57,20 +57,62 @@ private struct BuildRow: View {
       StatusPill(status: build.status)
 
       VStack(alignment: .leading, spacing: 4) {
-        Text("#\(build.buildNumber)")
-          .font(.headline)
-        Text("Workflow: \(build.workflowID) • Branch: \(build.branch)")
+        if let title = build.title, !title.isEmpty {
+          Text(title)
+            .font(.headline)
+            .lineLimit(1)
+        } else {
+          Text("#\(build.buildNumber)")
+            .font(.headline)
+        }
+
+        Text("#\(build.buildNumber) • Workflow: \(build.workflowID) • Branch: \(build.branch)")
           .font(.subheadline)
           .foregroundStyle(.secondary)
       }
 
       Spacer()
 
+      if let label = build.artifact?.versionLabel {
+        VersionPill(label: label, artifactType: build.artifact?.type)
+      }
+
       Text(build.startedAt, style: .relative)
         .font(.subheadline)
         .foregroundStyle(.secondary)
     }
     .padding(.vertical, 4)
+  }
+}
+
+private struct VersionPill: View {
+  let label: String
+  let artifactType: String?
+
+  var body: some View {
+    Label {
+      Text(label)
+    } icon: {
+      Image(systemName: iconName)
+    }
+    .labelStyle(.titleAndIcon)
+    .font(.caption.weight(.semibold))
+    .padding(.horizontal, 8)
+    .padding(.vertical, 4)
+    .background(Color.secondary.opacity(0.15))
+    .clipShape(Capsule())
+    .accessibilityLabel("App version: \(label)")
+  }
+
+  private var iconName: String {
+    switch artifactType {
+    case "ios-ipa":
+      "applelogo"
+    case "android-apk", "android-aab":
+      "shippingbox"
+    default:
+      "app"
+    }
   }
 }
 

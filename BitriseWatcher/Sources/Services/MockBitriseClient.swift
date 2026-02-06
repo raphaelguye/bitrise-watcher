@@ -25,10 +25,16 @@ actor MockBitriseClient: BitriseBuildsProviding {
         buildNumber: baseNumber - offset,
         workflowID: workflowID,
         branch: offset.isMultiple(of: 2) ? "main" : "feature/mock-\(refreshCount)",
+        title: offset == 0 ? "PR: Improve mock refresh UX (#\(baseNumber))" : nil,
         status: status,
-        startedAt: now.addingTimeInterval(TimeInterval(-offset * 60 * 7))
+        startedAt: now.addingTimeInterval(TimeInterval(-offset * 60 * 7)),
+        artifact: BuildArtifact(
+          title: "MyApp-v1.\(refreshCount).\(offset) (\(1000 + baseNumber - offset)).ipa",
+          type: "ios-ipa",
+          appVersion: "1.\(refreshCount).\(offset)",
+          appBuildNumber: String(1000 + baseNumber - offset)
+        )
       )
     }
   }
 }
-
