@@ -33,6 +33,11 @@ targets:
     settings:
       base:
         PRODUCT_NAME: "Birise Watcher"
+      configs:
+        Debug:
+          SWIFT_ACTIVE_COMPILATION_CONDITIONS: "$(inherited) DEBUG"
+        Release:
+          SWIFT_ACTIVE_COMPILATION_CONDITIONS: "$(inherited)"
 
 schemes:
   BitriseWatcher:

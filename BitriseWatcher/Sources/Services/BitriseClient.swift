@@ -1,4 +1,5 @@
 import Foundation
+import os
 
 struct BitriseClientConfiguration: Sendable {
   let apiToken: String
@@ -39,14 +40,20 @@ enum BitriseClientError: Error, LocalizedError, Sendable {
 actor BitriseClient: BitriseBuildsProviding {
   private let configuration: BitriseClientConfiguration
   private let urlSession: URLSession
+  private let logger: Logger
 
   init(configuration: BitriseClientConfiguration, urlSession: URLSession = .shared) {
     self.configuration = configuration
     self.urlSession = urlSession
+    self.logger = Logger(subsystem: Bundle.main.bundleIdentifier ?? "ch.ragu.BitriseWatcher", category: "BitriseClient")
   }
 
   func fetchBuilds(appSlug: String, workflowID: String) async throws -> [Build] {
+    let requestID = UUID().uuidString
+    logDebug("[\(requestID)] fetchBuilds start appSlug=\(appSlug) workflowID=\(workflowID.isEmpty ? "<empty>" : workflowID)")
+
     guard !configuration.apiToken.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+      logError("[\(requestID)] missing API token")
       throw BitriseClientError.missingAPIToken
     }
 
@@ -67,6 +74,8 @@ actor BitriseClient: BitriseBuildsProviding {
 
     guard let url = components?.url else { throw BitriseClientError.invalidURL }
 
+    logDebug("[\(requestID)] GET \(url.absoluteString)")
+
     var request = URLRequest(url: url)
     request.httpMethod = "GET"
     request.setValue(configuration.apiToken, forHTTPHeaderField: "Authorization")
@@ -75,13 +84,17 @@ actor BitriseClient: BitriseBuildsProviding {
     let (data, response) = try await urlSession.data(for: request)
 
     guard let httpResponse = response as? HTTPURLResponse else {
+      logError("[\(requestID)] missing HTTPURLResponse")
       throw BitriseClientError.httpError(statusCode: -1, message: "No HTTP response.")
     }
 
     guard (200..<300).contains(httpResponse.statusCode) else {
       let message = (try? JSONDecoder().decode(BitriseAPIMessageResponse.self, from: data))?.message
+      logHTTPError(requestID: requestID, url: url, statusCode: httpResponse.statusCode, message: message, data: data)
       throw BitriseClientError.httpError(statusCode: httpResponse.statusCode, message: message)
     }
+
+    logDebug("[\(requestID)] builds response \(httpResponse.statusCode) bytes=\(data.count)")
 
     let decoder = JSONDecoder()
     decoder.dateDecodingStrategy = .iso8601
@@ -89,10 +102,36 @@ actor BitriseClient: BitriseBuildsProviding {
     do {
       let response = try decoder.decode(BitriseBuildsResponse.self, from: data)
       let builds = response.data.map { $0.toBuild() }.sorted { $0.buildNumber > $1.buildNumber }
-      return try await attachArtifactMetadata(appSlug: appSlug, builds: builds)
+      logDebug("[\(requestID)] decoded builds count=\(builds.count), enriching artifacts…")
+      return try await attachArtifactMetadata(appSlug: appSlug, builds: builds, requestID: requestID)
     } catch {
+      logDecodingError(requestID: requestID, url: url, data: data, error: error)
       throw BitriseClientError.decodingError
     }
+  }
+
+  private func logDebug(_ message: String) {
+#if DEBUG
+    logger.debug("\(message, privacy: .public)")
+#endif
+  }
+
+  private func logError(_ message: String) {
+    logger.error("\(message, privacy: .public)")
+  }
+
+  private func logHTTPError(requestID: String, url: URL, statusCode: Int, message: String?, data: Data) {
+    let snippet = String(data: data.prefix(1024), encoding: .utf8) ?? "<non-utf8>"
+    if let message, !message.isEmpty {
+      logger.error("[\(requestID)] HTTP \(statusCode) \(url.absoluteString, privacy: .public) message=\"\(message, privacy: .public)\" bodySnippet=\(snippet, privacy: .private(mask: .hash))")
+    } else {
+      logger.error("[\(requestID)] HTTP \(statusCode) \(url.absoluteString, privacy: .public) bodySnippet=\(snippet, privacy: .private(mask: .hash))")
+    }
+  }
+
+  private func logDecodingError(requestID: String, url: URL, data: Data, error: Error) {
+    let snippet = String(data: data.prefix(1024), encoding: .utf8) ?? "<non-utf8>"
+    logger.error("[\(requestID)] decode failed url=\(url.absoluteString, privacy: .public) error=\(String(describing: error), privacy: .public) bodySnippet=\(snippet, privacy: .private(mask: .hash))")
   }
 }
 
@@ -188,22 +227,28 @@ private extension BuildStatus {
 }
 
 private extension BitriseClient {
-  func attachArtifactMetadata(appSlug: String, builds: [Build]) async throws -> [Build] {
+  func attachArtifactMetadata(appSlug: String, builds: [Build], requestID: String) async throws -> [Build] {
     let maxBuildsToEnrich = min(builds.count, 20)
     let head = Array(builds.prefix(maxBuildsToEnrich))
     let tail = Array(builds.dropFirst(maxBuildsToEnrich))
 
     var enriched = head
 
+    logDebug("[\(requestID)] enrichArtifacts start buildsToEnrich=\(head.count)")
+    let logger = self.logger
+
     try await withThrowingTaskGroup(of: (Int, BuildArtifact?).self) { group in
       for (index, build) in head.enumerated() {
         group.addTask { [urlSession, configuration] in
+          let artifactRequestID = "\(requestID):artifact:\(build.id)"
           let artifact = try await BitriseClient.fetchInstallableArtifact(
             urlSession: urlSession,
             baseURL: configuration.baseURL,
             apiToken: configuration.apiToken,
             appSlug: appSlug,
-            buildSlug: build.id
+            buildSlug: build.id,
+            logger: logger,
+            requestID: artifactRequestID
           )
           return (index, artifact)
         }
@@ -223,6 +268,9 @@ private extension BitriseClient {
       }
     }
 
+    let artifactsFound = enriched.compactMap(\.artifact).count
+    logDebug("[\(requestID)] enrichArtifacts done artifactsFound=\(artifactsFound)/\(enriched.count)")
+
     return enriched + tail
   }
 
@@ -231,9 +279,13 @@ private extension BitriseClient {
     baseURL: URL,
     apiToken: String,
     appSlug: String,
-    buildSlug: String
+    buildSlug: String,
+    logger: Logger?,
+    requestID: String
   ) async throws -> BuildArtifact? {
     let url = baseURL.appendingPathComponent("apps/\(appSlug)/builds/\(buildSlug)/artifacts")
+
+    bitriseLogDebug(logger, "[\(requestID)] GET \(url.absoluteString)")
 
     var request = URLRequest(url: url)
     request.httpMethod = "GET"
@@ -242,15 +294,23 @@ private extension BitriseClient {
 
     let (data, response) = try await urlSession.data(for: request)
     guard let httpResponse = response as? HTTPURLResponse else { return nil }
-    guard (200..<300).contains(httpResponse.statusCode) else { return nil }
+    guard (200..<300).contains(httpResponse.statusCode) else {
+      bitriseLogHTTPError(logger, requestID: requestID, url: url, statusCode: httpResponse.statusCode, data: data)
+      return nil
+    }
 
     let decoder = JSONDecoder()
-    guard let artifactsResponse = try? decoder.decode(BitriseArtifactsResponse.self, from: data) else { return nil }
+    guard let artifactsResponse = try? decoder.decode(BitriseArtifactsResponse.self, from: data) else {
+      bitriseLogDecodingError(logger, requestID: requestID, url: url, data: data)
+      return nil
+    }
 
     let preferredTypes: Set<String> = ["ios-ipa", "android-apk", "android-aab"]
     let artifact = artifactsResponse.data.first(where: { preferredTypes.contains($0.artifactType ?? "") }) ?? artifactsResponse.data.first
 
     guard let artifact, let title = artifact.title, let type = artifact.artifactType else { return nil }
+
+    bitriseLogDebug(logger, "[\(requestID)] artifacts decoded count=\(artifactsResponse.data.count) selectedType=\(type)")
 
     var extracted = extractVersionAndBuildNumber(from: artifact.artifactMeta)
     var version = extracted.0
@@ -271,7 +331,9 @@ private extension BitriseClient {
         apiToken: apiToken,
         appSlug: appSlug,
         buildSlug: buildSlug,
-        artifactSlug: artifactSlug
+        artifactSlug: artifactSlug,
+        logger: logger,
+        requestID: requestID + ":details"
       ) {
         extracted = extractVersionAndBuildNumber(from: details.artifactMeta)
         version = version ?? extracted.0
@@ -299,9 +361,13 @@ private extension BitriseClient {
     apiToken: String,
     appSlug: String,
     buildSlug: String,
-    artifactSlug: String
+    artifactSlug: String,
+    logger: Logger?,
+    requestID: String
   ) async throws -> BitriseArtifactDTO? {
     let url = baseURL.appendingPathComponent("apps/\(appSlug)/builds/\(buildSlug)/artifacts/\(artifactSlug)")
+
+    bitriseLogDebug(logger, "[\(requestID)] GET \(url.absoluteString)")
 
     var request = URLRequest(url: url)
     request.httpMethod = "GET"
@@ -310,7 +376,10 @@ private extension BitriseClient {
 
     let (data, response) = try await urlSession.data(for: request)
     guard let httpResponse = response as? HTTPURLResponse else { return nil }
-    guard (200..<300).contains(httpResponse.statusCode) else { return nil }
+    guard (200..<300).contains(httpResponse.statusCode) else {
+      bitriseLogHTTPError(logger, requestID: requestID, url: url, statusCode: httpResponse.statusCode, data: data)
+      return nil
+    }
 
     let decoder = JSONDecoder()
     if let wrapped = try? decoder.decode(BitriseArtifactDetailsResponse.self, from: data) {
@@ -531,4 +600,20 @@ private extension BitriseClient {
 
     return (fallbackVersion, fallbackBuildNumber)
   }
+}
+
+private func bitriseLogDebug(_ logger: Logger?, _ message: String) {
+#if DEBUG
+  logger?.debug("\(message, privacy: .public)")
+#endif
+}
+
+private func bitriseLogHTTPError(_ logger: Logger?, requestID: String, url: URL, statusCode: Int, data: Data) {
+  let snippet = String(data: data.prefix(1024), encoding: .utf8) ?? "<non-utf8>"
+  logger?.error("[\(requestID)] HTTP \(statusCode) \(url.absoluteString, privacy: .public) bodySnippet=\(snippet, privacy: .private(mask: .hash))")
+}
+
+private func bitriseLogDecodingError(_ logger: Logger?, requestID: String, url: URL, data: Data) {
+  let snippet = String(data: data.prefix(1024), encoding: .utf8) ?? "<non-utf8>"
+  logger?.error("[\(requestID)] decode failed url=\(url.absoluteString, privacy: .public) bodySnippet=\(snippet, privacy: .private(mask: .hash))")
 }
