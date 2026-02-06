@@ -14,11 +14,14 @@ struct BuildArtifact: Sendable, Hashable {
   let appBuildNumber: String?
 
   var versionLabel: String? {
-    guard let appVersion, !appVersion.isEmpty else { return nil }
-    if let appBuildNumber, !appBuildNumber.isEmpty {
-      return "v\(appVersion) (\(appBuildNumber))"
+    let trimmedVersion = appVersion?.trimmingCharacters(in: .whitespacesAndNewlines)
+    let trimmedBuild = appBuildNumber?.trimmingCharacters(in: .whitespacesAndNewlines)
+
+    guard let trimmedVersion, !trimmedVersion.isEmpty else { return nil }
+    if let trimmedBuild, !trimmedBuild.isEmpty {
+      return "v\(trimmedVersion) (\(trimmedBuild))"
     }
-    return "v\(appVersion)"
+    return "v\(trimmedVersion)"
   }
 }
 

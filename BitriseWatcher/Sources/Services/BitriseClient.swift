@@ -251,7 +251,39 @@ private extension BitriseClient {
     let artifact = artifactsResponse.data.first(where: { preferredTypes.contains($0.artifactType ?? "") }) ?? artifactsResponse.data.first
 
     guard let artifact, let title = artifact.title, let type = artifact.artifactType else { return nil }
-    let (version, buildNumber) = parseVersionAndBuildNumber(from: title)
+
+    var extracted = extractVersionAndBuildNumber(from: artifact.artifactMeta)
+    var version = extracted.0
+    var buildNumber = extracted.1
+
+    if version == nil || buildNumber == nil {
+      let parsed = parseVersionAndBuildNumber(from: title)
+      version = version ?? parsed.0
+      buildNumber = buildNumber ?? parsed.1
+    }
+
+    if (buildNumber == nil || buildNumber?.isEmpty == true),
+       let artifactSlug = artifact.slug
+    {
+      if let details = try await fetchArtifactDetails(
+        urlSession: urlSession,
+        baseURL: baseURL,
+        apiToken: apiToken,
+        appSlug: appSlug,
+        buildSlug: buildSlug,
+        artifactSlug: artifactSlug
+      ) {
+        extracted = extractVersionAndBuildNumber(from: details.artifactMeta)
+        version = version ?? extracted.0
+        buildNumber = buildNumber ?? extracted.1
+
+#if DEBUG
+        if (buildNumber == nil || buildNumber?.isEmpty == true), let meta = details.artifactMeta {
+          print("[BitriseWatcher] Missing app build number. artifact_type=\(type) title=\"\(title)\" meta=\(meta.debugSummary)")
+        }
+#endif
+      }
+    }
 
     return BuildArtifact(
       title: title,
@@ -261,9 +293,35 @@ private extension BitriseClient {
     )
   }
 
+  static func fetchArtifactDetails(
+    urlSession: URLSession,
+    baseURL: URL,
+    apiToken: String,
+    appSlug: String,
+    buildSlug: String,
+    artifactSlug: String
+  ) async throws -> BitriseArtifactDTO? {
+    let url = baseURL.appendingPathComponent("apps/\(appSlug)/builds/\(buildSlug)/artifacts/\(artifactSlug)")
+
+    var request = URLRequest(url: url)
+    request.httpMethod = "GET"
+    request.setValue(apiToken, forHTTPHeaderField: "Authorization")
+    request.setValue("application/json", forHTTPHeaderField: "Accept")
+
+    let (data, response) = try await urlSession.data(for: request)
+    guard let httpResponse = response as? HTTPURLResponse else { return nil }
+    guard (200..<300).contains(httpResponse.statusCode) else { return nil }
+
+    let decoder = JSONDecoder()
+    if let wrapped = try? decoder.decode(BitriseArtifactDetailsResponse.self, from: data) {
+      return wrapped.data
+    }
+    return try? decoder.decode(BitriseArtifactDTO.self, from: data)
+  }
+
   static func parseVersionAndBuildNumber(from text: String) -> (String?, String?) {
     let versionRegex = try? NSRegularExpression(pattern: #"(?:^|[^0-9])v?(\d+(?:\.\d+){1,3})"#)
-    let buildRegex = try? NSRegularExpression(pattern: #"\((\d{1,10})\)"#)
+    let buildRegex = try? NSRegularExpression(pattern: #"(?:\((\d{1,10})\)|\bbuild[ _-]?(\d{1,10})\b)"#, options: [.caseInsensitive])
 
     var version: String?
     if let match = versionRegex?.firstMatch(in: text, range: NSRange(text.startIndex..., in: text)),
@@ -274,9 +332,13 @@ private extension BitriseClient {
 
     var buildNumber: String?
     if let match = buildRegex?.firstMatch(in: text, range: NSRange(text.startIndex..., in: text)),
-       let range = Range(match.range(at: 1), in: text)
+       (match.numberOfRanges >= 2)
     {
-      buildNumber = String(text[range])
+      if let range = Range(match.range(at: 1), in: text) {
+        buildNumber = String(text[range])
+      } else if match.numberOfRanges >= 3, let range = Range(match.range(at: 2), in: text) {
+        buildNumber = String(text[range])
+      }
     }
 
     return (version, buildNumber)
@@ -288,11 +350,185 @@ private struct BitriseArtifactsResponse: Decodable {
 }
 
 private struct BitriseArtifactDTO: Decodable {
+  let slug: String?
   let title: String?
   let artifactType: String?
+  let artifactMeta: JSONValue?
 
   enum CodingKeys: String, CodingKey {
+    case slug
     case title
     case artifactType = "artifact_type"
+    case artifactMeta = "artifact_meta"
+  }
+}
+
+private struct BitriseArtifactDetailsResponse: Decodable {
+  let data: BitriseArtifactDTO
+}
+
+private enum JSONValue: Decodable, Sendable, Hashable {
+  case object([String: JSONValue])
+  case array([JSONValue])
+  case string(String)
+  case number(Double)
+  case bool(Bool)
+  case null
+
+  init(from decoder: Decoder) throws {
+    let container = try decoder.singleValueContainer()
+
+    if container.decodeNil() {
+      self = .null
+    } else if let obj = try? container.decode([String: JSONValue].self) {
+      self = .object(obj)
+    } else if let arr = try? container.decode([JSONValue].self) {
+      self = .array(arr)
+    } else if let str = try? container.decode(String.self) {
+      self = .string(str)
+    } else if let num = try? container.decode(Double.self) {
+      self = .number(num)
+    } else if let bool = try? container.decode(Bool.self) {
+      self = .bool(bool)
+    } else {
+      self = .null
+    }
+  }
+
+  var stringValue: String? {
+    switch self {
+    case let .string(value):
+      return value
+    case let .number(value):
+      if value.rounded(.towardZero) == value { return String(Int(value)) }
+      return String(value)
+    case let .bool(value):
+      return value ? "true" : "false"
+    case .object, .array, .null:
+      return nil
+    }
+  }
+
+  var debugSummary: String {
+    switch self {
+    case let .object(obj):
+      let keys = obj.keys.sorted()
+      return "object(keys: \(keys.joined(separator: ", ")))"
+    case let .array(arr):
+      return "array(count: \(arr.count))"
+    case let .string(value):
+      return "string(\(value.prefix(80)))"
+    case let .number(value):
+      return "number(\(value))"
+    case let .bool(value):
+      return "bool(\(value))"
+    case .null:
+      return "null"
+    }
+  }
+}
+
+private extension JSONValue {
+  func firstStringValue(forKeys keys: [String]) -> String? {
+    let normalizedKeys = Set(keys.map { $0.lowercased() })
+
+    switch self {
+    case let .object(obj):
+      for (key, value) in obj {
+        if normalizedKeys.contains(key.lowercased()) {
+          if let str = value.stringValue {
+            return str
+          }
+          if let nested = value.firstStringValue(forKeys: ["value"]) {
+            return nested
+          }
+        }
+      }
+      for (_, value) in obj {
+        if let str = value.firstStringValue(forKeys: keys) {
+          return str
+        }
+      }
+      return nil
+    case let .array(arr):
+      for value in arr {
+        if let str = value.firstStringValue(forKeys: keys) {
+          return str
+        }
+      }
+      return nil
+    case .string, .number, .bool, .null:
+      return nil
+    }
+  }
+
+  func firstScalarString(where predicate: (String, String) -> Bool) -> String? {
+    switch self {
+    case let .object(obj):
+      for (key, value) in obj {
+        if let scalar = value.stringValue, predicate(key, scalar) {
+          return scalar
+        }
+        if value.stringValue == nil, let nested = value.firstStringValue(forKeys: ["value"]), predicate(key, nested) {
+          return nested
+        }
+      }
+      for (_, value) in obj {
+        if let found = value.firstScalarString(where: predicate) {
+          return found
+        }
+      }
+      return nil
+    case let .array(arr):
+      for value in arr {
+        if let found = value.firstScalarString(where: predicate) {
+          return found
+        }
+      }
+      return nil
+    case .string, .number, .bool, .null:
+      return nil
+    }
+  }
+}
+
+private extension BitriseClient {
+  static func extractVersionAndBuildNumber(from artifactMeta: JSONValue?) -> (String?, String?) {
+    guard let artifactMeta else { return (nil, nil) }
+
+    let versionKeys = [
+      "app_version",
+      "version",
+      "bundle_version_short",
+      "bundle_short_version",
+      "cfbundleshortversionstring",
+      "version_name",
+      "marketing_version",
+    ]
+
+    let buildNumberKeys = [
+      "app_build_number",
+      "build_number",
+      "build",
+      "bundle_version",
+      "cfbundleversion",
+      "version_code",
+    ]
+
+    let version = artifactMeta.firstStringValue(forKeys: versionKeys)
+    let buildNumber = artifactMeta.firstStringValue(forKeys: buildNumberKeys)
+
+    let fallbackVersion = version ?? artifactMeta.firstScalarString { key, value in
+      let k = key.lowercased()
+      return k.contains("version") && value.contains(".")
+    }
+
+    let fallbackBuildNumber = buildNumber ?? artifactMeta.firstScalarString { key, value in
+      let k = key.lowercased()
+      let digitsOnly = !value.isEmpty && value.allSatisfy(\.isNumber)
+      return digitsOnly && (k.contains("build") || k.contains("bundle") || k.contains("version_code"))
+    }
+
+    return (fallbackVersion, fallbackBuildNumber)
   }
 }
