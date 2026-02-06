@@ -34,3 +34,13 @@ schemes:
         BitriseWatcher: all
     run:
       config: Debug
+  BitriseWatcher-Mock:
+    build:
+      targets:
+        BitriseWatcher: all
+    run:
+      config: Debug
+      environmentVariables:
+        BITRISE_WATCHER_USE_MOCKS: "1"
+        BITRISE_APP_SLUG: "MOCK_APP_SLUG"
+        BITRISE_WORKFLOW_ID: "MOCK_WORKFLOW_ID"

@@ -1,12 +1,13 @@
 import SwiftUI
 
 @main
+@MainActor
 struct BitriseWatcherApp: App {
-  @StateObject private var buildsViewModel = BuildsViewModel(
-    appSlug: "MOCK_APP_SLUG",
-    workflowID: "MOCK_WORKFLOW_ID",
-    buildsProvider: MockBitriseClient()
-  )
+  @StateObject private var buildsViewModel: BuildsViewModel
+
+  init() {
+    _buildsViewModel = StateObject(wrappedValue: AppEnvironment.makeBuildsViewModel())
+  }
 
   var body: some Scene {
     WindowGroup {
