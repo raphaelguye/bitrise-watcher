@@ -13,3 +13,6 @@ DerivedData/
 # SwiftPM
 .swiftpm/
 .build/
+
+# Local secrets (do not commit)
+Configs/Local.xcconfig

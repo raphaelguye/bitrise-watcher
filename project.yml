@@ -1,5 +1,9 @@
 name: BitriseWatcher
 
+configs:
+  Debug: debug
+  Release: release
+
 options:
   bundleIdPrefix: ch.ragu
   deploymentTarget:
@@ -16,6 +20,9 @@ targets:
   BitriseWatcher:
     type: application
     platform: macOS
+    configFiles:
+      Debug: Configs/Base.xcconfig
+      Release: Configs/Base.xcconfig
     sources:
       - path: BitriseWatcher/Sources
     info:
@@ -34,6 +41,11 @@ schemes:
         BitriseWatcher: all
     run:
       config: Debug
+      environmentVariables:
+        BITRISE_WATCHER_USE_MOCKS: "0"
+        BITRISE_API_TOKEN: "$(BITRISE_API_TOKEN)"
+        BITRISE_APP_SLUG: "$(BITRISE_APP_SLUG)"
+        BITRISE_WORKFLOW_ID: "$(BITRISE_WORKFLOW_ID)"
   BitriseWatcher-Mock:
     build:
       targets:

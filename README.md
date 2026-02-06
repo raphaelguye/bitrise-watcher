@@ -19,10 +19,12 @@ Then open `BitriseWatcher.xcodeproj` and run the `BitriseWatcher` scheme.
 - Default view shows only successful builds; toggle to show all statuses.
 
 ## Real Bitrise API mode
-The app reads configuration from scheme environment variables:
-- `BITRISE_API_TOKEN`: your Bitrise Personal Access Token (required for real mode)
-- `BITRISE_APP_SLUG`: the Bitrise app slug to query
-- `BITRISE_WORKFLOW_ID`: workflow id to filter builds (optional)
+The app reads configuration from environment variables, which are injected by the Xcode scheme (from build settings).
+
+Recommended setup:
+- Copy `Configs/Local.xcconfig.example` → `Configs/Local.xcconfig` (gitignored)
+- Fill `BITRISE_API_TOKEN`, `BITRISE_APP_SLUG`, and optionally `BITRISE_WORKFLOW_ID`
+- Generate the Xcode project (`xcodegen generate`) and run the `BitriseWatcher` scheme
 
 If `BITRISE_API_TOKEN` is missing, the app shows an error when refreshing.
 

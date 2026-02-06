@@ -1,0 +1,5 @@
+// Copy to `Configs/Local.xcconfig` (gitignored) and fill values.
+BITRISE_API_TOKEN = "your_token_here"
+BITRISE_APP_SLUG = "your_app_slug_here"
+BITRISE_WORKFLOW_ID = "your_workflow_id_here"
+
