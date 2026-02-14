@@ -1,0 +1,8 @@
+schemaVersion: 1
+
+# Keep this config lightweight for a macOS app. It helps XcodeBuildMCP pick the right
+# project + scheme when invoked from external MCP clients.
+sessionDefaults:
+  scheme: BitriseWatcher
+  projectPath: ./BitriseWatcher.xcodeproj
+
