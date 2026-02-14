@@ -20,6 +20,11 @@ struct BuildsView: View {
             onCopyCommand: { copyDefaultCommand(for: build) }
           )
           .tag(build.id)
+          .simultaneousGesture(
+            TapGesture(count: 2).onEnded {
+              run(build: build)
+            }
+          )
         }
       }
       .overlay {
