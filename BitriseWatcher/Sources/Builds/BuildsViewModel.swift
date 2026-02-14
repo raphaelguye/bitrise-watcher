@@ -32,6 +32,8 @@ final class BuildsViewModel: ObservableObject {
     self.buildsProvider = buildsProvider
   }
 
+  var appSlugValue: String { appSlug }
+
   var builds: [Build] {
     switch filter {
     case .successOnly:
@@ -39,6 +41,11 @@ final class BuildsViewModel: ObservableObject {
     case .all:
       allBuilds
     }
+  }
+
+  func build(withID id: String?) -> Build? {
+    guard let id else { return nil }
+    return allBuilds.first(where: { $0.id == id })
   }
 
   func refresh() async {

@@ -17,6 +17,9 @@ Then open `BitriseWatcher.xcodeproj` and run the `BitriseWatcher` scheme.
 - Shows a mocked list of Bitrise builds for a mocked `appSlug` + `workflowID`.
 - Has a `Refresh` button that re-fetches mocked data (with a short delay) and updates the list.
 - Default view shows only successful builds; toggle to show all statuses.
+- Select a build and run a local command via `Run…` (or right-click a row).
+  - Command templates support variables like `{{buildID}}`, `{{buildNumber}}`, `{{artifactTitle}}`, `{{appVersion}}`, etc.
+  - The runner also exports env vars like `BITRISE_WATCHER_BUILD_ID`, `BITRISE_WATCHER_ARTIFACT_TITLE`, etc.
 
 ## Real Bitrise API mode
 The app reads configuration from environment variables, which are injected by the Xcode scheme (from build settings).
