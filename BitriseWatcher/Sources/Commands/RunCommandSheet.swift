@@ -98,7 +98,7 @@ struct RunCommandSheet: View {
         .font(.system(.body, design: .monospaced))
         .frame(minHeight: 120)
 
-        Text("Variables: {{buildID}}, {{buildNumber}}, {{workflowID}}, {{branch}}, {{status}}, {{artifactTitle}}, {{artifactType}}, {{appVersion}}, {{appBuildNumber}}, {{appSlug}}")
+        Text("Variables: {{buildSlug}}, {{buildNumber}}, {{workflowID}}, {{branch}}, {{status}}, {{artifactTitle}}, {{artifactType}}, {{appVersion}}, {{appBuildNumber}}, {{appSlug}}")
           .font(.caption)
           .foregroundStyle(.secondary)
 
@@ -216,4 +216,3 @@ struct RunCommandSheet: View {
     presetsStore: CommandPresetsStore()
   )
 }
-

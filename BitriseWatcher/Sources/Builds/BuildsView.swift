@@ -148,7 +148,7 @@ private struct BuildRow: View {
     .contextMenu {
       Button("Run…") { onRun() }
       Button("Copy Command") { onCopyCommand() }
-      Button("Copy Build ID") {
+      Button("Copy Build slug") {
 #if canImport(AppKit)
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(build.id, forType: .string)

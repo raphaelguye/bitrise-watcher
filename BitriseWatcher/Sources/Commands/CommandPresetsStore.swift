@@ -97,17 +97,12 @@ final class CommandPresetsStore: ObservableObject {
     [
       CommandPreset(
         name: "Resign & Deploy",
-        template: #"echo "Resign & Deploy build={{buildID}} artifact={{artifactTitle}} version={{appVersion}} buildNumber={{appBuildNumber}}""#
-      ),
-      CommandPreset(
-        name: "Deploy Only",
-        template: #"echo "Deploy build={{buildID}} artifact={{artifactTitle}}""#
+        template: #"echo "Resign & Deploy build={{buildSlug}} artifact={{artifactTitle}} version={{appVersion}} buildNumber={{appBuildNumber}}""#
       ),
       CommandPreset(
         name: "Custom",
-        template: #"echo "Selected build={{buildNumber}} workflow={{workflowID}} branch={{branch}}""#
+        template: #"echo "Selected build={{buildNumber}} workflow={{workflowID}} branch={{branch}} (slug={{buildSlug}})""#
       ),
     ]
   }
 }
-
