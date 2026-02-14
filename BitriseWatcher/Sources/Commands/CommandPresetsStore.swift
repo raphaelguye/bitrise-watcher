@@ -77,6 +77,8 @@ final class CommandPresetsStore: ObservableObject {
       savePresets()
     }
 
+    migratePresetsIfNeeded()
+
     if let raw = defaults.string(forKey: selectedPresetKey),
        let id = UUID(uuidString: raw),
        presets.contains(where: { $0.id == id })
@@ -84,6 +86,46 @@ final class CommandPresetsStore: ObservableObject {
       selectedPresetID = id
     } else {
       selectedPresetID = presets.first?.id
+      defaults.set(selectedPresetID?.uuidString, forKey: selectedPresetKey)
+    }
+  }
+
+  private func migratePresetsIfNeeded() {
+    // Presets persist in UserDefaults. Enforce that only the two supported presets exist,
+    // and normalize naming/variables for older saved presets.
+    let previousSelection = selectedPresetID
+
+    var resign = presets.first(where: { $0.name == "Resign and Deploy" })
+      ?? presets.first(where: { $0.name == "Resign & Deploy" })
+
+    var custom = presets.first(where: { $0.name == "Custom" })
+
+    if resign == nil {
+      resign = Self.defaultPresets.first(where: { $0.name == "Resign and Deploy" })
+    }
+    if custom == nil {
+      custom = Self.defaultPresets.first(where: { $0.name == "Custom" })
+    }
+
+    guard var resign, let custom else { return }
+
+    if resign.name != "Resign and Deploy" {
+      resign.name = "Resign and Deploy"
+    }
+    resign.template = resign.template
+      .replacingOccurrences(of: "Resign & Deploy", with: "Resign and Deploy")
+      .replacingOccurrences(of: "{{buildID}}", with: "{{buildSlug}}")
+
+    let nextPresets = [resign, custom]
+    if presets != nextPresets {
+      presets = nextPresets
+      savePresets()
+    }
+
+    if let previousSelection, presets.contains(where: { $0.id == previousSelection }) {
+      selectedPresetID = previousSelection
+    } else {
+      selectedPresetID = resign.id
       defaults.set(selectedPresetID?.uuidString, forKey: selectedPresetKey)
     }
   }
@@ -96,8 +138,8 @@ final class CommandPresetsStore: ObservableObject {
   private static var defaultPresets: [CommandPreset] {
     [
       CommandPreset(
-        name: "Resign & Deploy",
-        template: #"echo "Resign & Deploy build={{buildSlug}} artifact={{artifactTitle}} version={{appVersion}} buildNumber={{appBuildNumber}}""#
+        name: "Resign and Deploy",
+        template: #"echo "Resign and Deploy build={{buildSlug}} artifact={{artifactTitle}} version={{appVersion}} buildNumber={{appBuildNumber}}""#
       ),
       CommandPreset(
         name: "Custom",
