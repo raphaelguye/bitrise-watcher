@@ -14,13 +14,16 @@ final class LocalCommandRunner: ObservableObject {
     guard !command.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
     guard !isRunning else { return }
 
+    let normalizedCommand = normalizeCommandDashes(command)
+
     output = ""
     exitCode = nil
-    launchedCommand = command
+    launchedCommand = normalizedCommand
 
     let process = Process()
-    process.executableURL = URL(fileURLWithPath: "/bin/zsh")
-    process.arguments = ["-lc", command]
+    let shellPath = ProcessInfo.processInfo.environment["SHELL"] ?? "/bin/zsh"
+    process.executableURL = URL(fileURLWithPath: shellPath)
+    process.arguments = ["-lic", normalizedCommand]
 
     if let workingDirectory, !workingDirectory.isEmpty {
       let url = URL(fileURLWithPath: workingDirectory, isDirectory: true)
@@ -64,6 +67,9 @@ final class LocalCommandRunner: ObservableObject {
     }
 
     do {
+      if normalizedCommand != command {
+        output += "Note: converted smart dashes to '-' before execution.\n"
+      }
       try process.run()
     } catch {
       handle.readabilityHandler = nil
@@ -91,5 +97,15 @@ final class LocalCommandRunner: ObservableObject {
       output += "<non-utf8 \(data.count) bytes>\n"
     }
   }
-}
 
+  private func normalizeCommandDashes(_ command: String) -> String {
+    command
+      .replacingOccurrences(of: "\u{2010}", with: "-") // hyphen
+      .replacingOccurrences(of: "\u{2011}", with: "-") // non-breaking hyphen
+      .replacingOccurrences(of: "\u{2012}", with: "-") // figure dash
+      .replacingOccurrences(of: "\u{2013}", with: "-") // en dash
+      .replacingOccurrences(of: "\u{2014}", with: "-") // em dash
+      .replacingOccurrences(of: "\u{2015}", with: "-") // horizontal bar
+      .replacingOccurrences(of: "\u{2212}", with: "-") // minus sign
+  }
+}
