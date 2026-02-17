@@ -3,6 +3,7 @@ import Foundation
 @MainActor
 final class LocalCommandRunner: ObservableObject {
   @Published private(set) var isRunning = false
+  @Published private(set) var rawOutput = ""
   @Published private(set) var output = ""
   @Published private(set) var exitCode: Int32?
   @Published private(set) var launchedCommand: String?
@@ -16,6 +17,7 @@ final class LocalCommandRunner: ObservableObject {
 
     let normalizedCommand = normalizeCommandDashes(command)
 
+    rawOutput = ""
     output = ""
     exitCode = nil
     launchedCommand = normalizedCommand
@@ -68,7 +70,7 @@ final class LocalCommandRunner: ObservableObject {
 
     do {
       if normalizedCommand != command {
-        output += "Note: converted smart dashes to '-' before execution.\n"
+        appendSystemOutput("Note: converted smart dashes to '-' before execution.\n")
       }
       try process.run()
     } catch {
@@ -76,7 +78,7 @@ final class LocalCommandRunner: ObservableObject {
       isRunning = false
       self.process = nil
       self.pipe = nil
-      output += "Failed to start process: \(String(describing: error))\n"
+      appendSystemOutput("Failed to start process: \(String(describing: error))\n")
     }
   }
 
@@ -85,6 +87,7 @@ final class LocalCommandRunner: ObservableObject {
   }
 
   func clearOutput() {
+    rawOutput = ""
     output = ""
     exitCode = nil
   }
@@ -92,9 +95,11 @@ final class LocalCommandRunner: ObservableObject {
   private func appendOutput(_ data: Data) {
     guard !data.isEmpty else { return }
     if let chunk = String(data: data, encoding: .utf8) {
-      output += chunk
+      rawOutput += chunk
+      output += sanitizeConsoleOutput(chunk)
     } else {
-      output += "<non-utf8 \(data.count) bytes>\n"
+      let message = "<non-utf8 \(data.count) bytes>\n"
+      appendSystemOutput(message)
     }
   }
 
@@ -107,7 +112,7 @@ final class LocalCommandRunner: ObservableObject {
     var isDirectory: ObjCBool = false
     let exists = FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory)
     guard exists, isDirectory.boolValue else {
-      output += "Warning: working directory does not exist: \(expandedPath)\n"
+      appendSystemOutput("Warning: working directory does not exist: \(expandedPath)\n")
       return (command, nil)
     }
 
@@ -133,6 +138,31 @@ final class LocalCommandRunner: ObservableObject {
 
     return value
   }
+
+  private func appendSystemOutput(_ message: String) {
+    rawOutput += message
+    output += message
+  }
+
+  private func sanitizeConsoleOutput(_ chunk: String) -> String {
+    var sanitized = chunk
+      .replacingOccurrences(of: "\r\n", with: "\n")
+      .replacingOccurrences(of: "\r", with: "\n")
+
+    sanitized = replacingMatches(of: Self.ansiEscapeRegex, in: sanitized)
+    sanitized = replacingMatches(of: Self.oscEscapeRegex, in: sanitized)
+    sanitized = replacingMatches(of: Self.ansiFragmentRegex, in: sanitized)
+    return sanitized
+  }
+
+  private func replacingMatches(of regex: NSRegularExpression, in input: String) -> String {
+    let range = NSRange(input.startIndex..<input.endIndex, in: input)
+    return regex.stringByReplacingMatches(in: input, options: [], range: range, withTemplate: "")
+  }
+
+  private static let ansiEscapeRegex = try! NSRegularExpression(pattern: "\u{001B}\\[[0-?]*[ -/]*[@-~]")
+  private static let oscEscapeRegex = try! NSRegularExpression(pattern: "\u{001B}\\][^\u{0007}\u{001B}]*(\u{0007}|\u{001B}\\\\)")
+  private static let ansiFragmentRegex = try! NSRegularExpression(pattern: "\\[[0-9;]*m")
 
   private func normalizeCommandDashes(_ command: String) -> String {
     command
