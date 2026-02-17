@@ -42,6 +42,7 @@ struct RunCommandSheet: View {
         draftTemplate = preset.template
       }
     }
+    .interactiveDismissDisabled(runner.isRunning)
     .onChange(of: selectedPresetID) { _, newValue in
       presetsStore.selectPreset(id: newValue)
       if let preset = presetsStore.selectedPreset {
@@ -63,6 +64,10 @@ struct RunCommandSheet: View {
       }
 
       Spacer()
+
+      Button("Close") { dismiss() }
+        .keyboardShortcut(.cancelAction)
+        .disabled(runner.isRunning)
 
       if runner.isRunning {
         ProgressView()
@@ -123,15 +128,13 @@ struct RunCommandSheet: View {
       Divider()
 
       HStack {
-        Button("Cancel") { dismiss() }
-          .keyboardShortcut(.cancelAction)
-
-        Spacer()
-
         if runner.isRunning {
+          Spacer()
           Button("Stop") { runner.cancel() }
             .keyboardShortcut(.escape, modifiers: [])
+          Spacer()
         } else {
+          Spacer()
           Button("Save Preset") { savePreset() }
             .disabled(!canSavePreset)
 
