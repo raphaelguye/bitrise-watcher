@@ -20,11 +20,11 @@ make generate
 Then open `BitriseWatcher.xcodeproj` and run the `BitriseWatcher` scheme.
 
 ## Screenshots
-![Builds - Success filter](docs/screenshots/builds-success.png)
-
-![Builds - All statuses](docs/screenshots/builds-all.png)
-
-![Run command sheet](docs/screenshots/run-command-sheet.png)
+<p align="center">
+  <img src="docs/screenshots/builds-success.png" alt="Builds - Success filter" width="30%" style="vertical-align: middle;" />
+  <img src="docs/screenshots/builds-all.png" alt="Builds - All statuses" width="30%" style="vertical-align: middle;" />
+  <img src="docs/screenshots/run-command-sheet.png" alt="Run command sheet" width="30%" style="vertical-align: middle;" />
+</p>
 
 ## Configuration (required for real Bitrise data)
 The app reads configuration from environment variables, which are injected by the Xcode scheme (from build settings).
