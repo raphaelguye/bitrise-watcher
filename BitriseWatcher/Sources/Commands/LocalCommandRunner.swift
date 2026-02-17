@@ -23,18 +23,18 @@ final class LocalCommandRunner: ObservableObject {
     let process = Process()
     let shellPath = ProcessInfo.processInfo.environment["SHELL"] ?? "/bin/zsh"
     process.executableURL = URL(fileURLWithPath: shellPath)
-    process.arguments = ["-lic", normalizedCommand]
-
-    if let workingDirectory, !workingDirectory.isEmpty {
-      let url = URL(fileURLWithPath: workingDirectory, isDirectory: true)
-      if FileManager.default.fileExists(atPath: url.path) {
-        process.currentDirectoryURL = url
-      }
+    let preparedCommand = buildShellCommand(command: normalizedCommand, workingDirectory: workingDirectory)
+    process.arguments = ["-lic", preparedCommand.command]
+    if let workingDirectoryURL = preparedCommand.workingDirectoryURL {
+      process.currentDirectoryURL = workingDirectoryURL
     }
 
-    var env = ProcessInfo.processInfo.environment
+    var env: [String: String] = [:]
+    for (key, value) in ProcessInfo.processInfo.environment {
+      env[key] = sanitizeEnvironmentValue(value)
+    }
     for (k, v) in environment {
-      env[k] = v
+      env[k] = sanitizeEnvironmentValue(v)
     }
     process.environment = env
 
@@ -96,6 +96,42 @@ final class LocalCommandRunner: ObservableObject {
     } else {
       output += "<non-utf8 \(data.count) bytes>\n"
     }
+  }
+
+  private func buildShellCommand(command: String, workingDirectory: String?) -> (command: String, workingDirectoryURL: URL?) {
+    guard let workingDirectory, !workingDirectory.isEmpty else { return (command, nil) }
+
+    let expandedPath = NSString(string: workingDirectory).expandingTildeInPath
+    let url = URL(fileURLWithPath: expandedPath, isDirectory: true)
+
+    var isDirectory: ObjCBool = false
+    let exists = FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory)
+    guard exists, isDirectory.boolValue else {
+      output += "Warning: working directory does not exist: \(expandedPath)\n"
+      return (command, nil)
+    }
+
+    // Keep process cwd in sync and enforce cwd again after shell profile/init files are loaded.
+    let quotedPath = shellSingleQuote(url.path)
+    return ("cd -- \(quotedPath) && \(command)", url)
+  }
+
+  private func shellSingleQuote(_ value: String) -> String {
+    "'\(value.replacingOccurrences(of: "'", with: "'\"'\"'"))'"
+  }
+
+  private func sanitizeEnvironmentValue(_ value: String) -> String {
+    var sanitized = value.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !sanitized.isEmpty else { return value }
+
+    // Some launch contexts (xcconfig/scheme vars) provide values wrapped in quotes.
+    if (sanitized.hasPrefix("\"") && sanitized.hasSuffix("\"")) || (sanitized.hasPrefix("'") && sanitized.hasSuffix("'")) {
+      sanitized.removeFirst()
+      sanitized.removeLast()
+      return sanitized.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    return value
   }
 
   private func normalizeCommandDashes(_ command: String) -> String {
