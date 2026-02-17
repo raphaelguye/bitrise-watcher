@@ -1,6 +1,6 @@
 # bitrise-watcher
 
-A lightweight macOS app to monitor Bitrise builds and trigger local follow-up actions quickly.
+A lightweight macOS app to monitor [Bitrise](https://bitrise.io) builds and trigger local follow-up actions quickly.
 
 It helps you:
 - See recent builds for one app/workflow
@@ -18,6 +18,13 @@ make generate
 ```
 
 Then open `BitriseWatcher.xcodeproj` and run the `BitriseWatcher` scheme.
+
+## Screenshots
+![Builds - Success filter](docs/screenshots/builds-success.png)
+
+![Builds - All statuses](docs/screenshots/builds-all.png)
+
+![Run command sheet](docs/screenshots/run-command-sheet.png)
 
 ## Configuration (required for real Bitrise data)
 The app reads configuration from environment variables, which are injected by the Xcode scheme (from build settings).
